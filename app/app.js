@@ -7,6 +7,7 @@ const list = board.querySelector('[data-testid="incident-list"]');
 const loader = board.querySelector('[data-testid="loader"]');
 const empty = board.querySelector('[data-testid="empty"]');
 const status = document.querySelector('[data-role="status"]');
+const newBar = board.querySelector('[data-testid="new-bar"]');
 
 const acked = new Set(); // incident ids acked from this board
 
@@ -37,32 +38,56 @@ function rowHtml(i) {
   </li>`;
 }
 
-// R1: keep rows keyed by id, so a refresh never redraws a row someone is about to click.
-// New incidents go in at the top, newest first; rows that left the feed are removed.
-function render(incidents, initial) {
-  const want = new Set(incidents.map((i) => i.id));
-  for (const li of [...list.children]) if (!want.has(li.dataset.id)) li.remove();
+// R1 (changed by product, 2026-11-14): the list holds still while it is on screen. Rows already shown keep
+// their place and are never removed; incidents that arrive later wait in the "N new" bar (R7) and come in,
+// newest first, at the top only when on-call clicks the bar.
+const shown = new Set(); // ids in the list
+let pending = []; // new incidents waiting behind the bar, newest first
 
-  let prev = null;
+function insertTop(incidents, flash) {
+  const frag = document.createDocumentFragment();
   for (const i of incidents) {
-    let li = list.querySelector(`[data-testid="incident-row"][data-id="${CSS.escape(i.id)}"]`);
-    if (!li) {
-      const tpl = document.createElement('template');
-      tpl.innerHTML = rowHtml(i).trim();
-      li = tpl.content.firstChild;
-      if (!initial) li.classList.add('new');
-    }
-    const at = prev ? prev.nextSibling : list.firstChild;
-    if (li !== at) list.insertBefore(li, at);
-    prev = li;
+    if (shown.has(i.id)) continue;
+    const tpl = document.createElement('template');
+    tpl.innerHTML = rowHtml(i).trim();
+    const li = tpl.content.firstChild;
+    if (flash) li.classList.add('new');
+    frag.append(li);
+    shown.add(i.id);
   }
-
-  loader.remove(); // R3: gone once incidents load
-  list.hidden = incidents.length === 0;
-  empty.hidden = incidents.length !== 0;
+  list.prepend(frag);
 }
 
-// R2: Ack acks the incident of the row clicked (by its id), then marks that row acked.
+function render(incidents) {
+  loader.remove(); // R3: gone once incidents load
+  if (shown.size === 0) {
+    // Nothing on screen yet, so nothing can move under a hand: show what there is.
+    insertTop(incidents, false);
+  } else {
+    const waiting = new Set(pending.map((i) => i.id));
+    const fresh = incidents.filter((i) => !shown.has(i.id) && !waiting.has(i.id));
+    pending = [...fresh, ...pending]; // the feed is newest first
+  }
+  list.hidden = shown.size === 0;
+  empty.hidden = shown.size !== 0;
+  showBar();
+}
+
+// R7: the "N new" bar. It keeps its space when empty, so its showing up never moves the list.
+function showBar() {
+  newBar.textContent = pending.length === 1 ? '1 new incident · show' : `${pending.length} new incidents · show`;
+  newBar.classList.toggle('on', pending.length > 0);
+  newBar.disabled = pending.length === 0;
+}
+
+newBar.addEventListener('click', () => {
+  if (!pending.length) return;
+  insertTop(pending, true);
+  pending = [];
+  showBar();
+});
+
+// R2: Ack acks the incident of the row clicked (by its id), then marks that row acked. Ack stays on the row.
 list.addEventListener('click', async (e) => {
   const btn = e.target.closest('[data-testid="ack"]');
   if (!btn) return;
@@ -87,7 +112,7 @@ let first = true;
 async function tick() {
   try {
     const page = await fetchIncidents();
-    render(page.incidents, first);
+    render(page.incidents);
     status.textContent = `· updated ${timeFmt.format(new Date(page.updatedAt || Date.now()))}`;
   } catch (err) {
     console.error(err);

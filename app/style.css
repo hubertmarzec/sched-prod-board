@@ -16,3 +16,5 @@ footer { color: #777; font-size: 13px; }
 .row.new { animation: flash 1.5s ease-out; }
 @keyframes flash { from { background: #fff6cc; } to { background: #fff; } }
 .status { color: #888; font-size: 13px; }
+.new-bar { display: block; box-sizing: border-box; width: 100%; max-width: 960px; height: 36px; margin: 0 0 8px; border: 0; border-radius: 6px; font: inherit; font-weight: 600; color: #3a2f00; background: #ffe58a; cursor: pointer; visibility: hidden; }
+.new-bar.on { visibility: visible; }
